@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <string.h>
 #include "simple_aes.h"
+#include "util.h"
 
 /* KEY = ffffffffffffffffffffffffffffffff
  * PLAINTEXT = 00000000000000000000000000000000
@@ -14,10 +15,8 @@ int main(void) {
     uint8_t * message = (uint8_t *) calloc(16, sizeof(uint8_t));
     uint8_t * key = (uint8_t *) calloc(16, sizeof(uint8_t));
 
-    if (message == NULL || key == NULL) {
-        fprintf(stderr, "memory allocation failure in %s:%d\n", __FILE__, __LINE__);
-        exit(EXIT_FAILURE);
-    }
+    CHECK_ALLOC(message);
+    CHECK_ALLOC(key);
 
     /* set key and message to something simple */
     for (uint8_t i = 0; i < 16; i++) {
