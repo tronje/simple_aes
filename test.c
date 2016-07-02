@@ -5,14 +5,19 @@
 #include <string.h>
 #include "simple_aes.h"
 
-/*
-KEY = ffffffffffffffffffffffffffffffff
-PLAINTEXT = 00000000000000000000000000000000
-CIPHERTEXT = a1f6258c877d5fcd8964484538bfc92c
-*/
+/* KEY = ffffffffffffffffffffffffffffffff
+ * PLAINTEXT = 00000000000000000000000000000000
+ * CIPHERTEXT = a1f6258c877d5fcd8964484538bfc92c
+ */
+
 int main(void) {
     uint8_t * message = (uint8_t *) calloc(16, sizeof(uint8_t));
     uint8_t * key = (uint8_t *) calloc(16, sizeof(uint8_t));
+
+    if (message == NULL || key == NULL) {
+        fprintf(stderr, "memory allocation failure in %s:%d\n", __FILE__, __LINE__);
+        exit(EXIT_FAILURE);
+    }
 
     /* set key and message to something simple */
     for (uint8_t i = 0; i < 16; i++) {
