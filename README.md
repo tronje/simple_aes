@@ -5,5 +5,5 @@ implementations of AES on the web, so I wrote my own with help from
 [Wikipedia](http://en.wikipedia.org/wiki/Advanced_Encryption_Standard) and especially
 @samboy ([Sam Trenholme](http://samiam.org/rijndael.html)). Thanks!
 
-At this time, only 128-bit AES is implemented, and I should
-add more comments explaining things. This will hopefully happen soon.
+Please note that this is intended as a reference of sorts, not as a production-ready,
+fast and secure implementation. You probably shouldn't use this; use GPG instead.
