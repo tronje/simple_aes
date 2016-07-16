@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+/* Key-schedule sizes for different key sizes */
+#define SCHEDULE_SIZE_128BIT 176
+#define SCHEDULE_SIZE_192BIT 208
+#define SCHEDULE_SIZE_256BIT 240
+
 /* Rijndael's substitution box for sub_bytes step */
 uint8_t SBOX[256] = {
      0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
@@ -60,24 +65,29 @@ uint8_t inv_shifts[16] = {
     12,  9,  6,  3
 };
 
+/* add the round key to the state with simple XOR operation */
 void add_round_key(uint8_t * state, uint8_t * rkey) {
     for (uint8_t i = 0; i < 16; i++) {
         state[i] ^= rkey[i];
     }
 }
 
+/* substitute all bytes using Rijndael's substitution box */
 void sub_bytes(uint8_t * state) {
     for (uint8_t i = 0; i < 16; i++) {
         state[i] = SBOX[state[i]];
     }
 }
 
+/* reverse the sub bytes step using Rijndael's inverse s-box */
 void inv_sub_bytes(uint8_t * state) {
     for (uint8_t i = 0; i < 16; i++) {
         state[i] = INV_SBOX[state[i]];
     }
 }
 
+/* imagine the state not as 1-dimensional, but a 4x4 grid;
+ * this step shifts the rows of this grid around */
 void shift_rows(uint8_t * state) {
     uint8_t temp[16];
 
@@ -90,6 +100,7 @@ void shift_rows(uint8_t * state) {
     }
 }
 
+/* the inverse of the shift rows step */
 void inv_shift_rows(uint8_t * state) {
     uint8_t temp[16];
 
@@ -216,42 +227,66 @@ void schedule_core(uint8_t * in, uint8_t n) {
 }
 
 /* expand the key */
-void expand_key(uint8_t * in) {
+void expand_key(uint8_t * in, uint32_t keysize) {
     uint8_t t[4];
-    uint8_t size = 16;
+    uint8_t size = keysize / 8;
     uint8_t n = 1;
+    uint8_t schedule_size;
 
-    while (size < 176) {
+    if (keysize == 128) {
+        schedule_size = SCHEDULE_SIZE_128BIT;
+    }
+    else if (keysize == 192) {
+        schedule_size = SCHEDULE_SIZE_192BIT;
+    }
+    else if (keysize == 256) {
+        schedule_size = SCHEDULE_SIZE_256BIT;
+    }
+    else {
+        fprintf(stderr, "Invalid keysize! Exiting...\n");
+        free(in);
+        exit(EXIT_FAILURE);
+    }
+
+    while (size < schedule_size) {
         for (uint8_t i = 0; i < 4; i++) {
             t[i] = in[i + size - 4];
         }
 
-        if (size % 16 == 0) {
+        if ((size % (keysize / 8)) == 0) {
             schedule_core(t, n);
             n++;
         }
 
+        /* 256 bit keys get an extra S-Box operation */
+        if (keysize == 256 && size % (keysize / 8) == 16) {
+            for (uint8_t i = 0; i < 4; i++) {
+                t[i] = SBOX[t[i]];
+            }
+        }
+
         for (uint8_t i = 0; i < 4; i++) {
-            in[size] = in[size - 16] ^ t[i];
+            in[size] = in[size - (keysize / 8)] ^ t[i];
             size++;
         }
     }
 }
 
 void aes128_encrypt(uint8_t * state, uint8_t * key) {
-    uint8_t * key_schedule = (uint8_t *) calloc(176, sizeof(uint8_t));
+    uint8_t * key_schedule =\
+        (uint8_t *) calloc(SCHEDULE_SIZE_128BIT, sizeof(uint8_t));
     uint8_t * round_key = (uint8_t *) calloc(16, sizeof(uint8_t));
 
     CHECK_ALLOC(key_schedule);
     CHECK_ALLOC(round_key);
 
+    /* initialize key schedule; its first 16 bytes are the key */
     for (uint8_t i = 0; i < 16; i++) {
-        /* initialize key schedule; its first 16 bytes are the key */
         key_schedule[i] = key[i];
     }
 
     /* populate the key schedule */
-    expand_key(key_schedule);
+    expand_key(key_schedule, /* keysize */ 128);
 
     /* set first round key */
     for (uint8_t i = 0; i < 16; i++) {
@@ -276,7 +311,7 @@ void aes128_encrypt(uint8_t * state, uint8_t * key) {
 
     /* prepare final round key */
     for (uint8_t i = 0; i < 16; i++) {
-        round_key[i] = key_schedule[i + 160];
+        round_key[i] = key_schedule[i + SCHEDULE_SIZE_128BIT - 16];
     }
 
     /* final round of the algorithm */
@@ -289,23 +324,24 @@ void aes128_encrypt(uint8_t * state, uint8_t * key) {
 }
 
 void aes128_decrypt(uint8_t * state, uint8_t * key) {
-    uint8_t * key_schedule = (uint8_t *) calloc(176, sizeof(uint8_t));
+    uint8_t * key_schedule =\
+        (uint8_t *) calloc(SCHEDULE_SIZE_128BIT, sizeof(uint8_t));
     uint8_t * round_key = (uint8_t *) calloc(16, sizeof(uint8_t));
 
     CHECK_ALLOC(key_schedule);
     CHECK_ALLOC(round_key);
 
+    /* initialize key schedule; its first 16 bytes are the key */
     for (uint8_t i = 0; i < 16; i++) {
-        /* initialize key schedule; its first 16 bytes are the key */
         key_schedule[i] = key[i];
     }
 
     /* populate the key schedule */
-    expand_key(key_schedule);
+    expand_key(key_schedule, /* keysize */ 128);
 
     /* the 'first' round key for decryption is the last in the schedule */
     for (uint8_t i = 0; i < 16; i++) {
-        round_key[i] = key_schedule[160 + i];
+        round_key[i] = key_schedule[SCHEDULE_SIZE_128BIT - 16 + i];
     }
 
     /* initial round of AddRoundKey step */
@@ -317,9 +353,219 @@ void aes128_decrypt(uint8_t * state, uint8_t * key) {
         inv_sub_bytes(state);
 
         for (uint8_t j = 0; j < 16; j++) {
-            round_key[j] = key_schedule[j + (160 - i * 16)];
+            round_key[j] =\
+                key_schedule[j + ((SCHEDULE_SIZE_128BIT - 16) - i * 16)];
         }
 
+        /* AddRoundKey is its own inverse */
+        add_round_key(state, round_key);
+        inv_mix_columns(state);
+    }
+
+    /* prepare final round key */
+    for (uint8_t i = 0; i < 16; i++) {
+        round_key[i] = key_schedule[i];
+    }
+
+    /* final round */
+    inv_shift_rows(state);
+    inv_sub_bytes(state);
+    add_round_key(state, round_key);
+
+    free(key_schedule);
+    free(round_key);
+}
+
+void aes192_encrypt(uint8_t * state, uint8_t * key) {
+    uint8_t * key_schedule =\
+        (uint8_t *) calloc(SCHEDULE_SIZE_192BIT, sizeof(uint8_t));
+    uint8_t * round_key = (uint8_t *) calloc(16, sizeof(uint8_t));
+
+    CHECK_ALLOC(key_schedule);
+    CHECK_ALLOC(round_key);
+
+    /* initialize key schedule; its first 24 bytes are the key */
+    for (uint8_t i = 0; i < 24; i++) {
+        key_schedule[i] = key[i];
+    }
+
+    /* populate the key schedule */
+    expand_key(key_schedule, /* keysize */ 192);
+
+    /* set first round key */
+    for (uint8_t i = 0; i < 16; i++) {
+        round_key[i] = key_schedule[i];
+    }
+
+    /* initial round of AddRoundKey step */
+    add_round_key(state, round_key);
+
+    /* rounds 1-11 of the algorithm */
+    for (uint8_t i = 1; i <= 11; i++) {
+        sub_bytes(state);
+        shift_rows(state);
+        mix_columns(state);
+
+        for (uint8_t j = 0; j < 16; j++) {
+            round_key[j] = key_schedule[j + i * 16];
+        }
+
+        add_round_key(state, round_key);
+    }
+
+    /* prepare final round key */
+    for (uint8_t i = 0; i < 16; i++) {
+        round_key[i] = key_schedule[i + SCHEDULE_SIZE_192BIT - 16];
+    }
+
+    /* final round of the algorithm */
+    sub_bytes(state);
+    shift_rows(state);
+    add_round_key(state, round_key);
+
+    free(key_schedule);
+    free(round_key);
+}
+
+void aes192_decrypt(uint8_t * state, uint8_t * key) {
+    uint8_t * key_schedule =\
+        (uint8_t *) calloc(SCHEDULE_SIZE_192BIT, sizeof(uint8_t));
+    uint8_t * round_key = (uint8_t *) calloc(16, sizeof(uint8_t));
+
+    CHECK_ALLOC(key_schedule);
+    CHECK_ALLOC(round_key);
+
+    /* initialize key schedule; its first 24 bytes are the key */
+    for (uint8_t i = 0; i < 24; i++) {
+        key_schedule[i] = key[i];
+    }
+
+    /* populate the key schedule */
+    expand_key(key_schedule, /* keysize */ 192);
+    
+    /* the 'first' round key for decryption is the last in the schedule */
+    for (uint8_t i = 0; i < 16; i++) {
+        round_key[i] = key_schedule[SCHEDULE_SIZE_192BIT - 16 + i];
+    }
+
+    /* initial round of AddRoundKey step */
+    add_round_key(state, round_key);
+
+    /* rounds 1-11 of the algorithm */
+    for (uint8_t i = 1; i <= 11; i++) {
+        inv_shift_rows(state);
+        inv_sub_bytes(state);
+
+        for (uint8_t j = 0; j < 16; j++) {
+            round_key[j] =\
+                key_schedule[j + ((SCHEDULE_SIZE_192BIT - 16) - i * 16)];
+        }
+
+        /* AddRoundKey is its own inverse */
+        add_round_key(state, round_key);
+        inv_mix_columns(state);
+    }
+
+    /* prepare final round key */
+    for (uint8_t i = 0; i < 16; i++) {
+        round_key[i] = key_schedule[i];
+    }
+
+    /* final round */
+    inv_shift_rows(state);
+    inv_sub_bytes(state);
+    add_round_key(state, round_key);
+
+    free(key_schedule);
+    free(round_key);
+}
+
+void aes256_encrypt(uint8_t * state, uint8_t * key) {
+    uint8_t * key_schedule =\
+        (uint8_t *) calloc(SCHEDULE_SIZE_256BIT, sizeof(uint8_t));
+    uint8_t * round_key = (uint8_t *) calloc(16, sizeof(uint8_t));
+
+    CHECK_ALLOC(key_schedule);
+    CHECK_ALLOC(round_key);
+
+    /* initialize key schedule; its first 32 bytes are the key */
+    for (uint8_t i = 0; i < 32; i++) {
+        key_schedule[i] = key[i];
+    }
+
+    /* populate the key schedule */
+    expand_key(key_schedule, /* keysize */ 256);
+
+    /* set first round key */
+    for (uint8_t i = 0; i < 16; i++) {
+        round_key[i] = key_schedule[i];
+    }
+
+    /* initial round of AddRoundKey step */
+    add_round_key(state, round_key);
+
+    /* rounds 1-13 of the algorithm */
+    for (uint8_t i = 1; i <= 13; i++) {
+        sub_bytes(state);
+        shift_rows(state);
+        mix_columns(state);
+
+        for (uint8_t j = 0; j < 16; j++) {
+            round_key[j] = key_schedule[j + i * 16];
+        }
+
+        add_round_key(state, round_key);
+    }
+
+    /* prepare final round key */
+    for (uint8_t i = 0; i < 16; i++) {
+        round_key[i] = key_schedule[i + SCHEDULE_SIZE_256BIT - 16];
+    }
+
+    /* final round of the algorithm */
+    sub_bytes(state);
+    shift_rows(state);
+    add_round_key(state, round_key);
+
+    free(key_schedule);
+    free(round_key);
+}
+
+void aes256_decrypt(uint8_t * state, uint8_t * key) {
+    uint8_t * key_schedule =\
+        (uint8_t *) calloc(SCHEDULE_SIZE_256BIT, sizeof(uint8_t));
+    uint8_t * round_key = (uint8_t *) calloc(16, sizeof(uint8_t));
+
+    CHECK_ALLOC(key_schedule);
+    CHECK_ALLOC(round_key);
+
+    /* initialize key schedule; its first 32 bytes are the key */
+    for (uint8_t i = 0; i < 32; i++) {
+        key_schedule[i] = key[i];
+    }
+
+    /* populate the key schedule */
+    expand_key(key_schedule, /* keysize */ 256);
+    
+    /* the 'first' round key for decryption is the last in the schedule */
+    for (uint8_t i = 0; i < 16; i++) {
+        round_key[i] = key_schedule[SCHEDULE_SIZE_256BIT - 16 + i];
+    }
+
+    /* initial round of AddRoundKey step */
+    add_round_key(state, round_key);
+
+    /* rounds 1-13 of the algorithm */
+    for (uint8_t i = 1; i <= 13; i++) {
+        inv_shift_rows(state);
+        inv_sub_bytes(state);
+
+        for (uint8_t j = 0; j < 16; j++) {
+            round_key[j] =\
+                key_schedule[j + ((SCHEDULE_SIZE_256BIT - 16) - i * 16)];
+        }
+
+        /* AddRoundKey is its own inverse */
         add_round_key(state, round_key);
         inv_mix_columns(state);
     }
